@@ -1,7 +1,7 @@
 CC=gcc
-CFLAGS=-Wall -Wextra
+CFLAGS=-Wall -Wextra -pthread
 TARGET=server
-SRC=src/main.c
+SRC=src/main.c src/thread_pool.c
 
 all:
 	$(CC) $(CFLAGS) $(SRC) -o $(TARGET)
