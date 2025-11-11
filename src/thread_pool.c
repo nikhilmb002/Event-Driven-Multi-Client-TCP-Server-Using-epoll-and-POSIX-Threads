@@ -8,24 +8,44 @@
 #define BUFFER_SIZE 1024
 
 void handle_client(int client_fd) {
+	
+	char buffer[1024];
 
-	 char buffer[BUFFER_SIZE];
-    	 ssize_t bytes_read;
+	while (1) {
 
-	 bytes_read = read(client_fd, buffer, BUFFER_SIZE - 1);
+		ssize_t bytes_read = read(client_fd,
+					  buffer,
+					  sizeof(buffer) - 1);
 
-	 if (bytes_read <= 0) {
-		
-		close(client_fd);
-		return;
-	 }
+		if (bytes_read == -1) {
 
-	 buffer[bytes_read] = '\0';
-	 printf("Worker handled FD %d: %s", client_fd, buffer);
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+				break;
 
-	 write(client_fd, buffer, bytes_read);
+			perror("read");
+			close(client_fd);
+			return;
+		}
+
+		if (bytes_read == 0) {
+
+			printf("Client disconnected: FD=%d\n",
+			       client_fd);
+			close(client_fd);
+			return;
+		}
+
+		buffer[bytes_read] = '\0';
+
+		printf("Thread %lu handled FD %d: %s",
+		       pthread_self(),
+		       client_fd,
+		       buffer);
+
+		write(client_fd, buffer, bytes_read);
+	}
+
 }
-
 void *worker_thread(void *arg) {
 
 	thread_pool_t *pool = (thread_pool_t *)arg;

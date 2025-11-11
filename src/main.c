@@ -109,7 +109,7 @@ void accept_new_connection() {
 		}
 
 		struct epoll_event ev;
-		ev.events = EPOLLIN | EPOLLET;
+		ev.events = EPOLLIN;
 		ev.data.fd = client_fd;
 
 		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &ev) == -1) {
