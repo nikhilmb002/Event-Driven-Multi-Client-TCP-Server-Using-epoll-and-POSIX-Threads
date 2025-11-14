@@ -10,6 +10,7 @@
 #include <sys/epoll.h>
 
 #include "thread_pool.h"
+#include "shared_memory.h"
 
 #define PORT 8080
 #define MAX_EVENTS 1024
@@ -87,8 +88,8 @@ void accept_new_connection() {
 	while (1) {
 
 		int client_fd = accept(server_fd,
-				(struct sockaddr *)&client_addr,
-				&client_len);
+				       (struct sockaddr *)&client_addr,
+				       &client_len);
 
 		if (client_fd == -1) {
 
@@ -112,12 +113,26 @@ void accept_new_connection() {
 		ev.events = EPOLLIN;
 		ev.data.fd = client_fd;
 
-		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &ev) == -1) {
+		if (epoll_ctl(epoll_fd,
+			      EPOLL_CTL_ADD,
+			      client_fd,
+			      &ev) == -1) {
 
 			perror("epoll_ctl: client add");
 			close(client_fd);
 			continue;
 		}
+
+		server_stats_t *stats = get_server_stats();
+
+		pthread_mutex_lock(&stats->mutex);
+		stats->total_connections++;
+		stats->active_connections++;
+		printf("Stats → Total: %d | Active: %d | Requests: %ld\n",
+		       stats->total_connections,
+		       stats->active_connections,
+		       stats->total_requests);
+		pthread_mutex_unlock(&stats->mutex);
 
 		printf("New client connected: FD=%d\n", client_fd);
 	}
@@ -141,7 +156,10 @@ int main() {
 	ev.events = EPOLLIN;
 	ev.data.fd = server_fd;
 
-	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &ev) == -1) {
+	if (epoll_ctl(epoll_fd,
+		      EPOLL_CTL_ADD,
+		      server_fd,
+		      &ev) == -1) {
 
 		perror("epoll_ctl: server add");
 		close(server_fd);
@@ -149,11 +167,15 @@ int main() {
 		exit(EXIT_FAILURE);
 	}
 
+	if (shared_memory_init() != 0) {
+
+		fprintf(stderr, "Shared memory init failed\n");
+		exit(EXIT_FAILURE);
+	}
+
 	if (thread_pool_init(&pool, THREAD_COUNT) != 0) {
 
-		fprintf(stderr, "Failed to initialize thread pool\n");
-		close(server_fd);
-		close(epoll_fd);
+		fprintf(stderr, "Thread pool init failed\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -163,7 +185,10 @@ int main() {
 
 	while (!stop_server) {
 
-		int n = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+		int n = epoll_wait(epoll_fd,
+				   events,
+				   MAX_EVENTS,
+				   -1);
 
 		if (n == -1) {
 
@@ -182,8 +207,20 @@ int main() {
 			}
 			else {
 
+				int client_fd = events[i].data.fd;
+
+				/* Disable FD temporarily */
+				struct epoll_event mod_ev;
+				mod_ev.events = 0;
+				mod_ev.data.fd = client_fd;
+
+				epoll_ctl(epoll_fd,
+					  EPOLL_CTL_MOD,
+					  client_fd,
+					  &mod_ev);
+
 				thread_pool_add_task(&pool,
-						events[i].data.fd);
+						     client_fd);
 			}
 		}
 	}
@@ -191,6 +228,7 @@ int main() {
 	printf("\nShutting down server...\n");
 
 	thread_pool_destroy(&pool);
+	shared_memory_cleanup();
 	close(server_fd);
 	close(epoll_fd);
 
